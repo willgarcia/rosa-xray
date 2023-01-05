@@ -1,30 +1,53 @@
-## aws-xray-kubernetes
+# rosa-xray
 
-Code examples showing how to run AWS X-Ray on a Kubernetes cluster for deep application insights. Please also see the acompanying [blog post](https://aws.amazon.com/de/blogs/compute/application-tracing-on-kubernetes-with-aws-x-ray/) for background information.
+ROSA adaptation of an AWS blog post on how to run [X-Ray on Kubernetes](https://aws.amazon.com/de/blogs/compute/application-tracing-on-kubernetes-with-aws-x-ray/).
 
-# Changelog
+## Pre-requisites
 
-* **04/05/2020** Clean up permissions for X-Ray daemon. Expose tcp and udp port.
-* **03/31/2020** Update deployment specs to latest k8s version. Use official AWS X-Ray Docker image.
-* **03/17/2020** Update sample app dependencies  
+- [CDK CLI](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_install)
+- ROSA enabled in your AWS account, and a [ROSA cluster with STS](https://docs.aws.amazon.com/ROSA/latest/userguide/getting-started-sts-auto.html)
+- [oc CLI](https://docs.openshift.com/container-platform/4.8/cli_reference/openshift_cli/getting-started-cli.html)
 
-## Run AWS X-Ray on Kubernetes
-The xray-daemon folder contains the code required to build and deploy an AWS X-Ray daemon Docker image and deploy this to an existing EKS or Kubernetes cluster.
+## Step 1 - CDK Deployment
 
-Images have been built and pushed to Docker Hub for easier consumption of this project.
+1. Login in into your ROSA cluster
 
-## Deploying
+```bash
+oc login  <cluster-api-endpoint> --username <username> --password <password>`
+```
 
-Set up the correct permissions in AWS IAM so your pod can utilize. Utilize the EKS feature for IAM for Service Accounts. See the file ``xray-k8s-daemonset.yaml`` or [EKS Userguide](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html) for setup instructions. Then run ```kubectl apply -f xray-k8s-daemonset.yaml``` to install the AWS X-Ray daemons on your Kubernetes cluster.
+1. Create the IAM role required for the ROSA service account
 
-Fallback option is to attache the IAM policy named ``arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess`` to the worker nodes in your cluster.
+```bash
+export ROSA_OIDC_PROVIDER=$(oc get authentication.config.openshift.io cluster -o json | jq -r .spec.serviceAccountIssuer| sed -e "s/^https:\\/\\///")
 
-## Demo apps
+cdk deploy --parameters rosaOidcEndpoint=${ROSA_OIDC_PROVIDER} --parameters rosaServiceAccount=xray-daemon --outputs-file ./cdk-outputs.json
+```
 
-Two simple demo applications are provided to showcase how AWS X-Ray enables deep application insights into a microservices architecture.
+## Step 2 - X-Ray Deployment
 
-Simply run ```kubectl apply -f k8s-deploy.yml``` to install both services. Look up the endpoint for service-a and send a couple of requests against this endpoint. Switch to the AWS X-Ray console and see how the traces are showing up in the console.
+```bash
+export AWS_REGION=$(cat ./cdk-outputs.json | jq -r .RosaXrayStack.oRosaXrayAwsRegion)
+export AWS_ROLE_ARN=$(cat ./cdk-outputs.json | jq -r .RosaXrayStack.oRosaXrayRoleArn)
+envsubst < xray-daemon/xray-k8s-daemonset.yaml | oc apply -f -
+```
 
-## License
+Verify that the X-Ray daemon is running successfully:
 
-This project is licensed under the Apache 2.0 License.
+```bash
+oc get pods -n aws-xray
+```
+
+## Step 3 - Demo apps
+
+```bash
+oc apply -f demo-app/k8s-deploy.yaml
+```
+
+### Clean up
+
+```bash
+oc delete -f xray-daemon/xray-k8s-daemonset.yaml
+oc delete -f demo-app/k8s-deploy.yaml
+cdk destroy
+```
