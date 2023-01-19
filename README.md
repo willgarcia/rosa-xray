@@ -19,17 +19,18 @@ oc login  <cluster-api-endpoint> --username <username> --password <password>`
 1. Create the IAM role required for the ROSA service account
 
 ```bash
+cd xray-iam/
 export ROSA_OIDC_PROVIDER=$(oc get authentication.config.openshift.io cluster -o json | jq -r .spec.serviceAccountIssuer| sed -e "s/^https:\\/\\///")
-
 cdk deploy --parameters rosaOidcEndpoint=${ROSA_OIDC_PROVIDER} --parameters rosaServiceAccount=xray-daemon --outputs-file ./cdk-outputs.json
+export AWS_REGION=$(cat ./cdk-outputs.json | jq -r .RosaXrayStack.oRosaXrayAwsRegion)
+export AWS_ROLE_ARN=$(cat ./cdk-outputs.json | jq -r .RosaXrayStack.oRosaXrayRoleArn)
 ```
 
 ## Step 2 - X-Ray Deployment
 
 ```bash
-export AWS_REGION=$(cat ./cdk-outputs.json | jq -r .RosaXrayStack.oRosaXrayAwsRegion)
-export AWS_ROLE_ARN=$(cat ./cdk-outputs.json | jq -r .RosaXrayStack.oRosaXrayRoleArn)
-envsubst < xray-daemon/xray-k8s-daemonset.yaml | oc apply -f -
+cd xray-daemon/
+envsubst < xray-k8s-daemonset.yaml | oc apply -f -
 ```
 
 Verify that the X-Ray daemon is running successfully:
@@ -41,7 +42,14 @@ oc get pods -n aws-xray
 ## Step 3 - Demo apps
 
 ```bash
-oc apply -f demo-app/k8s-deploy.yaml
+cd demo-app/
+oc apply -f k8s-deploy.yaml
+```
+
+Find the service-a EXTERNAL-IP and access it to generate traces in the X-Ray Console:
+
+```bash
+oc get svc
 ```
 
 ### Clean up
